@@ -1,11 +1,37 @@
-﻿using System;
+﻿using CommandLine;
+using CommandLine.Text;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading.Tasks;
 
-namespace WindowsPackager
+namespace Wpkg
 {
+	public class WpkgOptions
+	{
+		[Option('b', "build", Default = ".", HelpText = "Path to the folder to build a .deb file")]
+		public string DebianPackage { get; set; }
+
+		[Option('r', "rpm", Default = ".", HelpText = "Path to the folder to build a .rpm file")]
+		public string RpmPackage { get; set; }
+
+		[Option("d2u", Default = "", HelpText = "Convert dos to unix. Specify files divided by ';' or ','")]
+		public string Dos2Unix { get; set; }
+
+		[Option('x', "extract", Default = new string[0], HelpText = "Extracts specified .deb file to the specified folder")]
+		public string[] ExtractDeb { get; set; }
+
+		[Option('t', "theme", Default = "package", HelpText = "This will create an empty base structure for an .deb with the specified file name")]
+		public string ThemeDeb { get; set; }
+
+		[Option('e', "execs", Default = ".", HelpText = "The file with a list of files that should be 'chmoded' as 777")]
+		public string ExecsPath { get; set; }
+
+		[Option('s', "silent", Default = false, HelpText = "Is the 'silent' mode should be enabled")]
+		public bool SilentMode { get; set; }
+	}
 
 	public class Program
 	{
@@ -21,14 +47,6 @@ namespace WindowsPackager
 				"Section: Section",
 				"Version: 1.0"
 		  };
-		private const string CREATE_DEBIAN_PACKAGE = "-b";
-		private const string CREATE_RPM_PACKAGE = "-r";
-		private const string CONVERT_DOS2UNIX = "-d2u";
-		private const string EXTRACT_DEBIAN_PACKAGE = "-x";
-		private const string THEME_DEB = "--theme";
-		private const string HELPTEXT = "-h";
-		private const string EXEC_LISTS = "-e";
-		private const string SILENT_MODE = "-s";
 		private const string ERRMSG_DIR_FAILURE = "E: Directory was not found! Aborting...";
 		private const string ERRMSG_FILE_FAILURE = "E: Specified file does not exist! Aborting...";
 		private const string ERRMSG_ARGC_FAILURE = "E: Mismatch in arguments! (perhaps missing one or one too much?) Aborting...";
@@ -39,7 +57,121 @@ namespace WindowsPackager
 		private const int EXIT_DEBFILE_ERROR = 300;
 		private const int EXIT_STRUCT_ERROR = 400;
 
-		public static bool IsSilentMode { get; set; } = false;
+		public static WpkgOptions Options => _options;
+		private static WpkgOptions _options;
+
+		static void Main(string[] args)
+		{
+			var argsParser = Parser.Default;
+			var taskToWait = argsParser.ParseArguments<WpkgOptions>(args).MapResult<WpkgOptions, Task>(RunWpkg, (_) =>
+			{
+				Console.WriteLine("Older help text (for history and there are more info about some commands): \n");
+				InfoMessage();
+				return Task.CompletedTask;
+			});
+			taskToWait.GetAwaiter().GetResult();
+		}
+
+		private static Task RunWpkg(WpkgOptions options)
+		{
+			_options = options;
+
+			var cwd = Environment.CurrentDirectory;
+			Environment.CurrentDirectory = Path.GetPathRoot(cwd);
+			Environment.CurrentDirectory = GetCaseSensitivePath(cwd);
+
+			if (options.DebianPackage != null)
+			{
+				// to chmod them
+				List<string> execs = new List<string>();
+				if (options.ExecsPath != null && File.Exists(options.ExecsPath))
+				{
+					var txt = File.ReadAllText(options.ExecsPath);
+					execs.AddRange(txt.Split('\n').Select(x => x.TrimEnd('\r')));
+				}
+
+				if (Directory.Exists(options.DebianPackage))
+				{
+					BuilderDebType(options.DebianPackage, true, execs);
+				}
+				else
+				{
+					ExitWithMessage(ERRMSG_DIR_FAILURE, EXIT_DIR_ERROR);
+				}
+			}
+			else if (options.RpmPackage != null)
+			{
+				if (Directory.Exists(options.RpmPackage))
+				{
+					BuilderRPMType(options.RpmPackage, true);
+				}
+				else
+				{
+					ExitWithMessage(ERRMSG_DIR_FAILURE, EXIT_DIR_ERROR);
+				}
+			}
+			else if (options.ThemeDeb != null)
+			{
+				// create base theme dir
+				string target = LOCAL_DIR + "\\Library\\Themes\\" + options.ThemeDeb + ".theme";
+				Directory.CreateDirectory(target);
+				// create the necessary subdirs
+				Directory.CreateDirectory(target + "\\IconBundles");
+				Directory.CreateDirectory(target + "\\Bundles\\com.apple.springboard");
+				GenerateControlFile(LOCAL_DIR);
+			}
+			else if (options.ExtractDeb != null)
+			{
+				if (options.ExtractDeb.Length == 2)
+				{
+					// check if file exists & create extraction stream
+					if (File.Exists(options.ExtractDeb[0]) && Directory.Exists(options.ExtractDeb[1]))
+					{
+						ExtractorType(options.ExtractDeb[0], null, options.ExtractDeb[1]);
+					}
+					else
+					{
+						ExitWithMessage(ERRMSG_ARGC_FAILURE, EXIT_ARGS_MISMATCH);
+					}
+				}
+				else if (options.ExtractDeb.Length == 1)
+				{
+					// check if we have a path or direct filename => file cannot contain the '\' char
+					if (options.ExtractDeb[0].Contains("\\"))
+					{
+						if (File.Exists(options.ExtractDeb[0]))
+						{
+							ExtractorType(options.ExtractDeb[0], null, Path.GetDirectoryName(options.ExtractDeb[0]));
+						}
+						else
+						{
+							ExitWithMessage(ERRMSG_ARGC_FAILURE, EXIT_ARGS_MISMATCH);
+						}
+					}
+					else
+					{
+						if (File.Exists(LOCAL_DIR + "\\" + options.ExtractDeb[0]))
+						{
+							ExtractorType(LOCAL_DIR + "\\" + options.ExtractDeb[0], options.ExtractDeb[0], null);
+						}
+						else
+						{
+							ExitWithMessage(ERRMSG_FILE_FAILURE, EXIT_DEBFILE_ERROR);
+						}
+					}
+				}
+			}
+			else if (options.Dos2Unix != null)
+			{
+				Builder.Dos2Unix(options.Dos2Unix.Split(';', ','));
+			}
+			else
+			{
+				InfoMessage();
+			}
+
+			return Task.CompletedTask;
+		}
 
 		public static string GetCaseSensitivePath(string path)
 		{
@@ -49,145 +181,12 @@ namespace WindowsPackager
 				foreach (var name in path.Substring(root.Length).Split(Path.DirectorySeparatorChar))
 					root = Directory.GetFileSystemEntries(root, name).First();
 			}
-			catch (Exception e)
+			catch (Exception)
 			{
 				// Log("Path not found: " + path);
 				root += path.Substring(root.Length);
 			}
 			return root;
-		}
-
-		static void Main(string[] args)
-		{
-			var cwd = Environment.CurrentDirectory;
-			Environment.CurrentDirectory = Path.GetPathRoot(cwd);
-			Environment.CurrentDirectory = GetCaseSensitivePath(cwd);
-
-			// check because switch
-			if (args.Length == 0)
-			{
-				InfoMessage();
-				Environment.Exit(-1);
-			}
-			switch (args[0])
-			{
-				case CONVERT_DOS2UNIX:
-					if (args.Length == 2)
-					{
-						Builder.Dos2Unix(args[1].Split(';', ','));
-					}
-					else
-					{
-						ExitWithMessage(ERRMSG_ARGC_FAILURE, EXIT_ARGS_MISMATCH);
-					}
-					break;
-				case CREATE_RPM_PACKAGE:
-					if (args.Length == 2)
-					{
-						if (Directory.Exists(args[1]))
-						{
-							BuilderRPMType(args[1], true);
-						}
-						else
-						{
-							ExitWithMessage(ERRMSG_DIR_FAILURE, EXIT_DIR_ERROR);
-						}
-					}
-					else
-					{
-						BuilderRPMType(null, false);
-					}
-					break;
-				case CREATE_DEBIAN_PACKAGE:
-					if (args.Length >= 2)
-					{
-						// to chmod them
-						List<string> execs = new List<string>();
-						if (args.Length >= 4 && args[2] == EXEC_LISTS && File.Exists(args[3]))
-						{
-							var txt = File.ReadAllText(args[3]);
-							execs.AddRange(txt.Split('\n').Select(x => x.TrimEnd('\r')));
-						}
-
-						if (args.Length >= 5 && args[4] == SILENT_MODE)
-							IsSilentMode = true;
-
-						if (Directory.Exists(args[1]))
-						{
-							BuilderDebType(args[1], true, execs);
-						}
-						else
-						{
-							ExitWithMessage(ERRMSG_DIR_FAILURE, EXIT_DIR_ERROR);
-						}
-					}
-					else
-					{
-						BuilderDebType(null, false);
-					}
-					break;
-				case EXTRACT_DEBIAN_PACKAGE:
-					if (args.Length == 3)
-					{
-						// get properly formatted Path
-						string[] cmdargs = Environment.GetCommandLineArgs();
-						// check if file exists & create extraction stream
-						if (File.Exists(cmdargs[2]) && Directory.Exists(cmdargs[3]))
-						{
-							ExtractorType(cmdargs[2], null, cmdargs[3]);
-						}
-						else
-						{
-							ExitWithMessage(ERRMSG_ARGC_FAILURE, EXIT_ARGS_MISMATCH);
-						}
-					}
-					else if (args.Length == 2)
-					{
-						// check if we have a path or direct filename => file cannot contain the '\' char
-						if (args[1].Contains("\\"))
-						{
-							if (File.Exists(args[1]))
-							{
-								ExtractorType(args[1], null, Path.GetDirectoryName(args[1]));
-							}
-							else
-							{
-								ExitWithMessage(ERRMSG_ARGC_FAILURE, EXIT_ARGS_MISMATCH);
-							}
-						}
-						else
-						{
-							if (File.Exists(LOCAL_DIR + "\\" + args[1]))
-							{
-								ExtractorType(LOCAL_DIR + "\\" + args[1], args[1], null);
-							}
-							else
-							{
-								ExitWithMessage(ERRMSG_FILE_FAILURE, EXIT_DEBFILE_ERROR);
-							}
-						}
-					}
-					break;
-				case THEME_DEB:
-					if (args.Length != 2)
-					{
-						ExitWithMessage(ERRMSG_ARGC_FAILURE, EXIT_ARGS_MISMATCH);
-					}
-					// create base theme dir
-					string target = LOCAL_DIR + "\\Library\\Themes\\" + args[1] + ".theme";
-					Directory.CreateDirectory(target);
-					// create the necessary subdirs
-					Directory.CreateDirectory(target + "\\IconBundles");
-					Directory.CreateDirectory(target + "\\Bundles\\com.apple.springboard");
-					GenerateControlFile(LOCAL_DIR);
-					break;
-				case HELPTEXT:
-					InfoMessage();
-					break;
-				default:
-					InfoMessage();
-					break;
-			}
 		}
 
 		private static void BuilderDebType(string WorkDir, bool IsSpecified, List<string> execs = null)
@@ -209,16 +208,16 @@ namespace WindowsPackager
 		private static void ExtractorType(string PassedFilePath, string FileName, string TargetDirectory)
 		{
 			VerifyFile(PassedFilePath);
-			Extractor.DebName = Path.GetFileNameWithoutExtension(PassedFilePath);
+			var debName = Path.GetFileNameWithoutExtension(PassedFilePath);
 			if (String.IsNullOrEmpty(TargetDirectory))
 			{
 				Stream DebFileStream = Builder.CreateStream(FileName);
-				Extractor.ExtractEverything(DebFileStream, LOCAL_DIR);
+				Extractor.ExtractEverything(debName, DebFileStream, LOCAL_DIR);
 			}
 			else
 			{
 				Stream DebFileStream = Builder.CreateStream(PassedFilePath, 3);
-				Extractor.ExtractEverything(DebFileStream, TargetDirectory);
+				Extractor.ExtractEverything(debName, DebFileStream, TargetDirectory);
 			}
 		}
 
@@ -282,7 +281,7 @@ namespace WindowsPackager
 				 ConsoleColor.DarkGreen);
 			ColorizedMessage("Extras:\n" +
 				 "wpkg -h                    - Show this helptext\n" +
-				 "wpkg -d2u file1;file2;...  - Convert files from DOS to Unix\n" +
+				 "wpkg --d2u file1;file2;...  - Convert files from DOS to Unix\n" +
 				 "wpkg --theme               - Create a base for an iOS Theme\n" +
 				 "  in the directory you are currently\n",
 				 ConsoleColor.DarkMagenta);
@@ -297,7 +296,5 @@ namespace WindowsPackager
 			Console.WriteLine(Message);
 			Console.ForegroundColor = ConsoleColor.White;
 		}
-
-		// <-- FIN -->
 	}
 }

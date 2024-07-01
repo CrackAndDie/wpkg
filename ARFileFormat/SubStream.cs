@@ -3,202 +3,227 @@ using System.IO;
 
 namespace WindowsPackager.ARFileFormat
 {
+	public class SubStream : Stream
+	{
+		private Stream stream;
+		private long subStreamOffset;
+		private long subStreamLength;
+		private bool leaveParentOpen;
+		private bool readOnly;
+		private long position;
 
-    public class SubStream : Stream
-    {
+		public SubStream(Stream stream, long offset, long length, bool leaveParentOpen = false, bool readOnly = false)
+		{
+			this.stream = stream;
+			this.subStreamOffset = offset;
+			this.subStreamLength = length;
+			this.leaveParentOpen = leaveParentOpen;
+			this.readOnly = readOnly;
+			this.position = 0;
 
-        private Stream stream;
-        private long subStreamOffset;
-        private long subStreamLength;
-        private bool leaveParentOpen;
-        private bool readOnly;
-        private long position;
+			if (this.stream.CanSeek)
+			{
+				this.Seek(0, SeekOrigin.Begin);
+			}
+		}
 
-        public SubStream(Stream stream, long offset, long length, bool leaveParentOpen = false, bool readOnly = false) {
-            this.stream = stream;
-            this.subStreamOffset = offset;
-            this.subStreamLength = length;
-            this.leaveParentOpen = leaveParentOpen;
-            this.readOnly = readOnly;
-            this.position = 0;
+		public override bool CanRead
+		{
+			get
+			{
+				return this.stream.CanRead;
+			}
+		}
 
-            if (this.stream.CanSeek) {
-                this.Seek(0, SeekOrigin.Begin);
-            }
-        }
+		public override bool CanSeek
+		{
+			get
+			{
+				return this.stream.CanSeek;
+			}
+		}
 
-        public override bool CanRead
-        {
-            get
-            {
-                return this.stream.CanRead;
-            }
-        }
+		public override bool CanWrite
+		{
+			get
+			{
+				return !this.readOnly && this.stream.CanWrite;
+			}
+		}
 
-        public override bool CanSeek
-        {
-            get
-            {
-                return this.stream.CanSeek;
-            }
-        }
+		public override long Length
+		{
+			get
+			{
+				return this.subStreamLength;
+			}
+		}
 
-        public override bool CanWrite
-        {
-            get
-            {
-                return !this.readOnly && this.stream.CanWrite;
-            }
-        }
+		public override long Position
+		{
+			get
+			{
+				return this.position;
+			}
 
-        public override long Length
-        {
-            get
-            {
-                return this.subStreamLength;
-            }
-        }
+			set
+			{
+				lock (this.stream)
+				{
+					this.stream.Position = value + this.Offset;
+					this.position = value;
+				}
+			}
+		}
 
-        public override long Position
-        {
-            get
-            {
-                return this.position;
-            }
+		internal Stream Stream
+		{
+			get
+			{
+				return this.stream;
+			}
+		}
 
-            set
-            {
-                lock (this.stream) {
-                    this.stream.Position = value + this.Offset;
-                    this.position = value;
-                }
-            }
-        }
+		internal long Offset
+		{
+			get
+			{
+				return this.subStreamOffset;
+			}
+		}
 
-        internal Stream Stream
-        {
-            get
-            {
-                return this.stream;
-            }
-        }
+		public override void Flush()
+		{
+			lock (this.stream)
+			{
+				this.stream.Flush();
+			}
+		}
 
-        internal long Offset
-        {
-            get
-            {
-                return this.subStreamOffset;
-            }
-        }
+		public override int Read(byte[] buffer, int offset, int count)
+		{
+			lock (this.stream)
+			{
+				this.EnsurePosition();
 
-        public override void Flush() {
-            lock (this.stream) {
-                this.stream.Flush();
-            }
-        }
+				long bytesRemaining = this.Length - this.Position;
+				long bytesToRead = Math.Min(count, bytesRemaining);
 
-        public override int Read(byte[] buffer, int offset, int count) {
-            lock (this.stream) {
-                this.EnsurePosition();
+				if (bytesToRead < 0)
+				{
+					bytesToRead = 0;
+				}
 
-                long bytesRemaining = this.Length - this.Position;
-                long bytesToRead = Math.Min(count, bytesRemaining);
+				var read = this.stream.Read(buffer, offset, (int)bytesToRead);
+				this.position += read;
+				return read;
+			}
+		}
 
-                if (bytesToRead < 0) {
-                    bytesToRead = 0;
-                }
+		public override void Write(byte[] buffer, int offset, int count)
+		{
+			if (this.readOnly)
+			{
+				throw new NotSupportedException();
+			}
 
-                var read = this.stream.Read(buffer, offset, (int)bytesToRead);
-                this.position += read;
-                return read;
-            }
-        }
+			lock (this.stream)
+			{
+				this.EnsurePosition();
 
-        public override void Write(byte[] buffer, int offset, int count) {
-            if (this.readOnly) {
-                throw new NotSupportedException();
-            }
+				if (this.Position + offset + count > this.Length || this.Position < 0)
+				{
+					throw new InvalidOperationException("This write operation would exceed the current length of the substream.");
+				}
 
-            lock (this.stream) {
-                this.EnsurePosition();
+				this.stream.Write(buffer, offset, count);
+				this.position += count;
+			}
+		}
 
-                if (this.Position + offset + count > this.Length || this.Position < 0) {
-                    throw new InvalidOperationException("This write operation would exceed the current length of the substream.");
-                }
+		public override void WriteByte(byte value)
+		{
+			if (this.readOnly)
+			{
+				throw new NotSupportedException();
+			}
 
-                this.stream.Write(buffer, offset, count);
-                this.position += count;
-            }
-        }
+			lock (this.stream)
+			{
+				this.EnsurePosition();
 
-        public override void WriteByte(byte value) {
-            if (this.readOnly) {
-                throw new NotSupportedException();
-            }
+				if (this.Position > this.Length || this.Position < 0)
+				{
+					throw new InvalidOperationException("This write operation would exceed the current length of the substream.");
+				}
 
-            lock (this.stream) {
-                this.EnsurePosition();
+				this.stream.WriteByte(value);
+				this.position++;
+			}
+		}
 
-                if (this.Position > this.Length || this.Position < 0) {
-                    throw new InvalidOperationException("This write operation would exceed the current length of the substream.");
-                }
+		public override long Seek(long offset, SeekOrigin origin)
+		{
+			lock (this.stream)
+			{
+				switch (origin)
+				{
+					case SeekOrigin.Begin:
+						offset += this.subStreamOffset;
+						break;
 
-                this.stream.WriteByte(value);
-                this.position++;
-            }
-        }
+					case SeekOrigin.End:
+						long enddelta = this.subStreamOffset + this.subStreamLength - this.stream.Length;
+						offset += enddelta;
+						break;
 
-        public override long Seek(long offset, SeekOrigin origin) {
-            lock (this.stream) {
-                switch (origin) {
-                    case SeekOrigin.Begin:
-                        offset += this.subStreamOffset;
-                        break;
+					case SeekOrigin.Current:
+						break;
+				}
 
-                    case SeekOrigin.End:
-                        long enddelta = this.subStreamOffset + this.subStreamLength - this.stream.Length;
-                        offset += enddelta;
-                        break;
+				if (origin == SeekOrigin.Current)
+				{
+					this.EnsurePosition();
+				}
 
-                    case SeekOrigin.Current:
-                        break;
-                }
+				var parentPosition = this.stream.Seek(offset, origin);
+				this.position = parentPosition - this.Offset;
+				return this.position;
+			}
+		}
 
-                if (origin == SeekOrigin.Current) {
-                    this.EnsurePosition();
-                }
+		public override void SetLength(long value)
+		{
+			if (this.readOnly)
+			{
+				throw new NotSupportedException();
+			}
 
-                var parentPosition = this.stream.Seek(offset, origin);
-                this.position = parentPosition - this.Offset;
-                return this.position;
-            }
-        }
+			this.subStreamLength = value;
+		}
 
-        public override void SetLength(long value) {
-            if (this.readOnly) {
-                throw new NotSupportedException();
-            }
+		public void UpdateWindow(long offset, long length)
+		{
+			this.subStreamOffset = offset;
+			this.subStreamLength = length;
+		}
 
-            this.subStreamLength = value;
-        }
+		protected override void Dispose(bool disposing)
+		{
+			if (!this.leaveParentOpen)
+			{
+				this.stream.Dispose();
+			}
 
-        public void UpdateWindow(long offset, long length) {
-            this.subStreamOffset = offset;
-            this.subStreamLength = length;
-        }
+			base.Dispose(disposing);
+		}
 
-        protected override void Dispose(bool disposing) {
-            if (!this.leaveParentOpen) {
-                this.stream.Dispose();
-            }
-
-            base.Dispose(disposing);
-        }
-
-        private void EnsurePosition() {
-            if (this.stream.Position != this.position + this.Offset) {
-                this.stream.Position = this.position + this.Offset;
-            }
-        }
-    }
+		private void EnsurePosition()
+		{
+			if (this.stream.Position != this.position + this.Offset)
+			{
+				this.stream.Position = this.position + this.Offset;
+			}
+		}
+	}
 }

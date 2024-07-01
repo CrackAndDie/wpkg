@@ -4,56 +4,62 @@ using System.IO;
 
 namespace WindowsPackager.ARFileFormat
 {
+	public class ARFile : ArchiveFile
+	{
+		private const string Magic = "!<arch>\n";
+		private bool magicRead;
+		private ARHeader entryHeader;
 
-    public class ARFile : ArchiveFile
-    {
+		public ARFile(Stream stream, bool leaveOpen)
+			: base(stream, leaveOpen)
+		{
+		}
 
-        private const string Magic = "!<arch>\n";
-        private bool magicRead;
-        private ARHeader entryHeader;
+		public override bool Read()
+		{
+			this.EnsureMagicRead();
 
-        public ARFile(Stream stream, bool leaveOpen)
-            : base(stream, leaveOpen) {
-        }
+			if (this.EntryStream != null)
+			{
+				this.EntryStream.Dispose();
+			}
 
-        public override bool Read() {
-            this.EnsureMagicRead();
+			this.Align(2);
 
-            if (this.EntryStream != null) {
-                this.EntryStream.Dispose();
-            }
+			if (this.Stream.Position == this.Stream.Length)
+			{
+				return false;
+			}
 
-            this.Align(2);
+			this.entryHeader = this.Stream.ReadStruct<ARHeader>();
+			this.FileHeader = this.entryHeader;
+			this.FileName = this.entryHeader.FileName;
 
-            if (this.Stream.Position == this.Stream.Length) {
-                return false;
-            }
+			if (this.entryHeader.EndChar != "`\n")
+			{
+				throw new InvalidDataException("The magic for the file entry is invalid");
+			}
 
-            this.entryHeader = this.Stream.ReadStruct<ARHeader>();
-            this.FileHeader = this.entryHeader;
-            this.FileName = this.entryHeader.FileName;
+			this.EntryStream = new SubStream(this.Stream, this.Stream.Position, this.entryHeader.FileSize, leaveParentOpen: true);
 
-            if (this.entryHeader.EndChar != "`\n") {
-                throw new InvalidDataException("The magic for the file entry is invalid");
-            }
+			return true;
+		}
 
-            this.EntryStream = new SubStream(this.Stream, this.Stream.Position, this.entryHeader.FileSize, leaveParentOpen: true);
+		protected void EnsureMagicRead()
+		{
+			if (!this.magicRead)
+			{
+				byte[] buffer = new byte[Magic.Length];
+				this.Stream.Read(buffer, 0, buffer.Length);
+				var magic = Encoding.ASCII.GetString(buffer);
 
-            return true;
-        }
+				if (!string.Equals(magic, Magic, StringComparison.Ordinal))
+				{
+					throw new InvalidDataException("The .ar file did not start with the expected magic");
+				}
 
-        protected void EnsureMagicRead() {
-            if (!this.magicRead) {
-                byte[] buffer = new byte[Magic.Length];
-                this.Stream.Read(buffer, 0, buffer.Length);
-                var magic = Encoding.ASCII.GetString(buffer);
-
-                if (!string.Equals(magic, Magic, StringComparison.Ordinal)) {
-                    throw new InvalidDataException("The .ar file did not start with the expected magic");
-                }
-
-                this.magicRead = true;
-            }
-        }
-    }
+				this.magicRead = true;
+			}
+		}
+	}
 }

@@ -5,112 +5,130 @@ using System.Runtime.InteropServices;
 
 namespace WindowsPackager.ARFileFormat
 {
+	internal static class StreamExtensions
+	{
+		public static T ReadStruct<T>(this Stream stream)
+			where T : struct
+		{
+			if (stream == null)
+			{
+				throw new ArgumentNullException(nameof(stream));
+			}
 
-    internal static class StreamExtensions
-    {
+			var size = Marshal.SizeOf<T>();
 
-        public static T ReadStruct<T>(this Stream stream)
-            where T : struct {
-            if (stream == null) {
-                throw new ArgumentNullException(nameof(stream));
-            }
+			var data = new byte[size];
+			var totalRead = 0;
 
-            var size = Marshal.SizeOf<T>();
+			while (totalRead < size)
+			{
+				var read = stream.Read(data, totalRead, size);
 
-            var data = new byte[size];
-            var totalRead = 0;
+				if (read == 0)
+				{
+					break;
+				}
 
-            while (totalRead < size) {
-                var read = stream.Read(data, totalRead, size);
+				totalRead += read;
+			}
 
-                if (read == 0) {
-                    break;
-                }
+			if (totalRead < size)
+			{
+				throw new InvalidOperationException("Not enough data");
+			}
 
-                totalRead += read;
-            }
+			// Convert from network byte order (big endian) to little endian.
+			RespectEndianness<T>(data);
 
-            if (totalRead < size) {
-                throw new InvalidOperationException("Not enough data");
-            }
+			var pinnedData = GCHandle.Alloc(data, GCHandleType.Pinned);
 
-            // Convert from network byte order (big endian) to little endian.
-            RespectEndianness<T>(data);
+			try
+			{
+				var ptr = pinnedData.AddrOfPinnedObject();
+				return Marshal.PtrToStructure<T>(ptr);
+			}
+			finally
+			{
+				pinnedData.Free();
+			}
+		}
 
-            var pinnedData = GCHandle.Alloc(data, GCHandleType.Pinned);
+		public static int WriteStruct<T>(this Stream stream, T data)
+			where T : struct
+		{
+			if (stream == null)
+			{
+				throw new ArgumentNullException(nameof(stream));
+			}
 
-            try {
-                var ptr = pinnedData.AddrOfPinnedObject();
-                return Marshal.PtrToStructure<T>(ptr);
-            }
-            finally {
-                pinnedData.Free();
-            }
-        }
+			byte[] bytes = new byte[Marshal.SizeOf<T>()];
 
-        public static int WriteStruct<T>(this Stream stream, T data)
-            where T : struct {
-            if (stream == null) {
-                throw new ArgumentNullException(nameof(stream));
-            }
+			GCHandle handle = GCHandle.Alloc(bytes, GCHandleType.Pinned);
 
-            byte[] bytes = new byte[Marshal.SizeOf<T>()];
+			try
+			{
+				Marshal.StructureToPtr(data, handle.AddrOfPinnedObject(), true);
+			}
+			finally
+			{
+				handle.Free();
+			}
 
-            GCHandle handle = GCHandle.Alloc(bytes, GCHandleType.Pinned);
+			RespectEndianness<T>(bytes);
 
-            try {
-                Marshal.StructureToPtr(data, handle.AddrOfPinnedObject(), true);
-            }
-            finally {
-                handle.Free();
-            }
+			stream.Write(bytes, 0, bytes.Length);
+			return bytes.Length;
+		}
 
-            RespectEndianness<T>(bytes);
+		public static void WriteBE(this Stream stream, short value)
+		{
+			var data = BitConverter.GetBytes(value);
+			Array.Reverse(data);
+			stream.Write(data, 0, data.Length);
+		}
 
-            stream.Write(bytes, 0, bytes.Length);
-            return bytes.Length;
-        }
+		public static void WriteBE(this Stream stream, int value)
+		{
+			var data = BitConverter.GetBytes(value);
+			Array.Reverse(data);
+			stream.Write(data, 0, data.Length);
+		}
 
-        public static void WriteBE(this Stream stream, short value) {
-            var data = BitConverter.GetBytes(value);
-            Array.Reverse(data);
-            stream.Write(data, 0, data.Length);
-        }
+		public static void WriteBE(this Stream stream, long value)
+		{
+			var data = BitConverter.GetBytes(value);
+			Array.Reverse(data);
+			stream.Write(data, 0, data.Length);
+		}
 
-        public static void WriteBE(this Stream stream, int value) {
-            var data = BitConverter.GetBytes(value);
-            Array.Reverse(data);
-            stream.Write(data, 0, data.Length);
-        }
+		private static void RespectEndianness<T>(byte[] data)
+		{
+			foreach (var field in typeof(T).GetTypeInfo().DeclaredFields)
+			{
+				int length = 0;
 
-        public static void WriteBE(this Stream stream, long value) {
-            var data = BitConverter.GetBytes(value);
-            Array.Reverse(data);
-            stream.Write(data, 0, data.Length);
-        }
+				var type = field.FieldType;
 
-        private static void RespectEndianness<T>(byte[] data) {
-            foreach (var field in typeof(T).GetTypeInfo().DeclaredFields) {
-                int length = 0;
+				if (type.GetTypeInfo().IsEnum)
+				{
+					type = Enum.GetUnderlyingType(type);
+				}
 
-                var type = field.FieldType;
+				if (type == typeof(short) || type == typeof(ushort))
+				{
+					length = 2;
+				}
+				else if (type == typeof(int) || type == typeof(uint))
+				{
+					length = 4;
+				}
 
-                if (type.GetTypeInfo().IsEnum) {
-                    type = Enum.GetUnderlyingType(type);
-                }
-
-                if (type == typeof(short) || type == typeof(ushort)) {
-                    length = 2;
-                }
-                else if (type == typeof(int) || type == typeof(uint)) {
-                    length = 4;
-                }
-
-                if (length > 0) {
-                    var offset = Marshal.OffsetOf<T>(field.Name).ToInt32();
-                    Array.Reverse(data, offset, length);
-                }
-            }
-        }
-    }
+				if (length > 0)
+				{
+					var offset = Marshal.OffsetOf<T>(field.Name).ToInt32();
+					Array.Reverse(data, offset, length);
+				}
+			}
+		}
+	}
 }

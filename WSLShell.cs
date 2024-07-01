@@ -1,13 +1,10 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
-using System.Threading.Tasks;
 
-namespace SolidCP.Providers.OS
+namespace Wpkg
 {
 	public class WSLShell : Shell
 	{
@@ -123,7 +120,8 @@ namespace SolidCP.Providers.OS
 			if (IsWindows)
 			{
 				return BaseShell.ExecAsync($"{ShellExe} {command}", encoding);
-			} else // System is already unix, do not use WSL
+			}
+			else // System is already unix, do not use WSL
 			{
 				return BaseShell.ExecAsync(command, encoding);
 			}
@@ -149,8 +147,10 @@ namespace SolidCP.Providers.OS
 			return shell;
 		}
 
-		public override Shell Clone {
-			get {
+		public override Shell Clone
+		{
+			get
+			{
 				var clone = (WSLShell)base.Clone;
 				clone.CurrentDistro = CurrentDistro;
 				clone.OtherDistroName = OtherDistroName;
@@ -196,11 +196,5 @@ namespace SolidCP.Providers.OS
 		protected void OnBaseLogError(string msg) => LogError?.Invoke(msg);
 
 		public new readonly static WSLShell Default = new WSLShell();
-
-#if wpkg
-		public static bool IsWindows => RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows);
-#else
-		public static bool IsWindows => OSInfo.IsWindows;
-#endif
 	}
 }

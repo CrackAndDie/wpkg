@@ -5,17 +5,11 @@ using System.Text.RegularExpressions;
 using WindowsPackager.ARFileFormat;
 using ICSharpCode.SharpZipLib.Tar;
 using System.IO.Compression;
-using SolidCP.Providers.OS;
 using System.Collections.Generic;
+using System.Text;
 
-namespace WindowsPackager
+namespace Wpkg
 {
-
-	class CmdShell: Shell
-	{
-		public override string ShellExe => "Cmd";
-	} 
-
 	class Builder
 	{
 		private const LFileMode ArFileMode = LFileMode.S_IRUSR | LFileMode.S_IWUSR | LFileMode.S_IRGRP | LFileMode.S_IROTH | LFileMode.S_IFREG;
@@ -174,7 +168,7 @@ namespace WindowsPackager
 					entry.TarHeader.Mode = Convert.ToInt32("777", 8);
 				else entry.TarHeader.Mode = Convert.ToInt32("666", 8);
 			} else entry.TarHeader.Mode = Convert.ToInt32("777", 8);
-			if (!Program.IsSilentMode)
+			if (!Program.Options.SilentMode)
 				Console.WriteLine($"  add {entry.Name}");
 			arch.WriteEntry(entry, false);
 
@@ -193,7 +187,7 @@ namespace WindowsPackager
 			//Console.WriteLine($"Tar {directory} to data.tar");
 			string TarballName = "data.tar";
 			Stream outStream = File.Create(directory + "\\" + TarballName);
-			Stream tarballStream = new TarOutputStream(outStream);
+			Stream tarballStream = new TarOutputStream(outStream, Encoding.ASCII);
 			TarArchive dataTar = TarArchive.CreateOutputTarArchive(tarballStream);
 
 			Console.WriteLine($"Creating {origDir + "\\" + TarballName}");
@@ -239,7 +233,7 @@ namespace WindowsPackager
 			//Console.WriteLine($"Tar {directory} to control.tar");
 			string TarballName = "control.tar";
 			Stream outStream = File.Create(directory + "\\" + TarballName);
-			Stream tarballStream = new TarOutputStream(outStream);
+			Stream tarballStream = new TarOutputStream(outStream, Encoding.ASCII);
 			TarArchive controlTar = TarArchive.CreateOutputTarArchive(tarballStream);
 
 			Console.WriteLine($"Creating {origDir + "\\" + TarballName}");

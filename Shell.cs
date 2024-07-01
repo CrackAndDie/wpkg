@@ -3,18 +3,14 @@ using System.Linq;
 using System.Diagnostics;
 using System.IO;
 using System.Text;
-using System.Threading;
 using System.Threading.Tasks;
 using System.Runtime.CompilerServices;
-using System.ComponentModel;
-using System.ComponentModel.Design;
 using System.Text.RegularExpressions;
-using static System.Net.Mime.MediaTypeNames;
+using System.Runtime.InteropServices;
 
-namespace SolidCP.Providers.OS
+namespace Wpkg
 {
-
-	public abstract class Shell : INotifyCompletion
+	public class Shell : INotifyCompletion
 	{
 		const bool DoNotWaitForProcessExit = false;
 
@@ -55,7 +51,7 @@ namespace SolidCP.Providers.OS
 		public virtual char PathSeparator => Path.PathSeparator;
 		public bool CreateNoWindow = true;
 		public ProcessWindowStyle WindowStyle = ProcessWindowStyle.Normal;
-		public abstract string ShellExe { get; }
+		public virtual string ShellExe { get; } = IsWindows ? "Cmd" : "bash";
 
 		Process process;
 		public virtual Process Process
@@ -359,8 +355,16 @@ namespace SolidCP.Providers.OS
 			lock (error) error.Append(text);
 			if (Redirect) Console.Error.Write(text);
 		}
+
+
 #if wpkg
-		public readonly static Shell Default = new DefaultShell(); // OSInfo.Current.DefaultShell;
+		public static bool IsWindows => RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows);
+#else
+		public static bool IsWindows => OSInfo.IsWindows;
+#endif
+
+#if wpkg
+		public readonly static Shell Default = new Shell(); // OSInfo.Current.DefaultShell;
 #else
 		public static Shell Default => OSInfo.Current.DefaultShell;
 #endif
