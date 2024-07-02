@@ -206,6 +206,9 @@ namespace Wpkg
 			}
 		}
 
+		// https://stackoverflow.com/questions/434641/how-do-i-set-permissions-attributes-on-a-file-in-a-zip-file-using-pythons-zip/6297838#6297838
+		// https://unix.stackexchange.com/questions/14705/the-zip-formats-external-file-attribute/14727#14727
+		// https://github.com/dotnet/runtime/issues/17912
 		public static void AddToZip(ZipFile arch, FileSystemInfo info, List<string> execs, string prefix = "./")
 		{
 			ZipEntry entry = new ZipEntry(info.FullName);
@@ -215,17 +218,17 @@ namespace Wpkg
 				if (entry.Name.Contains("/bin/") || info.FullName.EndsWith(".exe") ||
 					info.Name == "preinst" || info.Name == "postinst" || info.Name == "prerm" || info.Name == "postrm" ||
 					execs.Contains(entry.Name))
-					entry..Mode = Convert.ToInt32("777", 8);
-				else entry.TarHeader.Mode = Convert.ToInt32("666", 8);
+					entry.ExternalFileAttributes = 777 << 16;
+				else entry.ExternalFileAttributes = 666 << 16;
 			}
-			else entry.TarHeader.Mode = Convert.ToInt32("777", 8);
+			else entry.ExternalFileAttributes = 777 << 16;
 			if (!Program.Options.SilentMode)
 				Console.WriteLine($"  add {entry.Name}");
-			arch.WriteEntry(entry, false);
+			arch.Add(entry);
 
 			if (info is DirectoryInfo dir)
 			{
-				foreach (var subinfo in dir.EnumerateFileSystemInfos()) AddToTar(arch, subinfo, execs, prefix);
+				foreach (var subinfo in dir.EnumerateFileSystemInfos()) AddToZip(arch, subinfo, execs, prefix);
 			}
 		}
 
