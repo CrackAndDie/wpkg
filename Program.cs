@@ -17,6 +17,9 @@ namespace Wpkg
 		[Option('r', "rpm", Default = ".", HelpText = "Path to the folder to build a .rpm file")]
 		public string RpmPackage { get; set; }
 
+		[Option('a', "app", Default = ".", HelpText = "Path to the folder to build a .app file for MacOS")]
+		public string AppPackage { get; set; }
+
 		[Option("d2u", Default = "", HelpText = "Convert dos to unix. Specify files divided by ';' or ','")]
 		public string Dos2Unix { get; set; }
 
@@ -80,19 +83,30 @@ namespace Wpkg
 			Environment.CurrentDirectory = Path.GetPathRoot(cwd);
 			Environment.CurrentDirectory = GetCaseSensitivePath(cwd);
 
+			// to chmod them
+			List<string> execs = new List<string>();
+			if (options.ExecsPath != null && File.Exists(options.ExecsPath))
+			{
+				var txt = File.ReadAllText(options.ExecsPath);
+				execs.AddRange(txt.Split('\n').Select(x => x.TrimEnd('\r')));
+			}
+
 			if (options.DebianPackage != null)
 			{
-				// to chmod them
-				List<string> execs = new List<string>();
-				if (options.ExecsPath != null && File.Exists(options.ExecsPath))
-				{
-					var txt = File.ReadAllText(options.ExecsPath);
-					execs.AddRange(txt.Split('\n').Select(x => x.TrimEnd('\r')));
-				}
-
 				if (Directory.Exists(options.DebianPackage))
 				{
 					BuilderDebType(options.DebianPackage, true, execs);
+				}
+				else
+				{
+					ExitWithMessage(ERRMSG_DIR_FAILURE, EXIT_DIR_ERROR);
+				}
+			}
+			else if (options.AppPackage != null)
+			{
+				if (Directory.Exists(options.AppPackage))
+				{
+					BuilderAppType(options.AppPackage, true, execs);
 				}
 				else
 				{
@@ -103,7 +117,7 @@ namespace Wpkg
 			{
 				if (Directory.Exists(options.RpmPackage))
 				{
-					BuilderRPMType(options.RpmPackage, true);
+					BuilderRPMType(options.RpmPackage, true, execs);
 				}
 				else
 				{
@@ -199,10 +213,17 @@ namespace Wpkg
 			Builder.BuildDataTarball(dir, execs);
 			Builder.BuildDebPackage(dir);
 		}
-		private static void BuilderRPMType(string WorkDir, bool IsSpecified)
+
+		private static void BuilderRPMType(string WorkDir, bool IsSpecified, List<string> execs = null)
 		{
 			string dir = (IsSpecified) ? WorkDir : LOCAL_DIR;
-			Builder.BuildRPMPackage(dir);
+			Builder.BuildRPMPackage(dir, execs);
+		}
+
+		private static void BuilderAppType(string WorkDir, bool IsSpecified, List<string> execs = null)
+		{
+			string dir = (IsSpecified) ? WorkDir : LOCAL_DIR;
+			Builder.BuildAppPackage(dir, execs);
 		}
 
 		private static void ExtractorType(string PassedFilePath, string FileName, string TargetDirectory)

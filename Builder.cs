@@ -7,6 +7,7 @@ using ICSharpCode.SharpZipLib.Tar;
 using System.IO.Compression;
 using System.Collections.Generic;
 using System.Text;
+using ICSharpCode.SharpZipLib.Zip;
 
 namespace Wpkg
 {
@@ -39,9 +40,8 @@ namespace Wpkg
 		private static string WSLPath(string path) => Regex.Replace(Path.GetFullPath(path), "^(?<drive>[A-Z]):",
 			match => $"/mnt/{match.Groups["drive"].Value.ToLower()}", RegexOptions.IgnoreCase | RegexOptions.Singleline)
 			.Replace(Path.DirectorySeparatorChar, '/');
-		public static void BuildRPMPackage(string PathToPackage)
+		public static void BuildRPMPackage(string pathToPackage, List<string> execs)
 		{
-
 			var distros = WSLShell.Default.InstalledDistros;
 			var rpmCompatibleDistro = distros
 				.Select(distro => new WSLShell(distro))
@@ -53,13 +53,13 @@ namespace Wpkg
 			Console.WriteLine();
 
 			string WorkingDirectory = "";
-			if (String.IsNullOrEmpty(PathToPackage))
+			if (String.IsNullOrEmpty(pathToPackage))
 			{
 				WorkingDirectory = LOCAL_DIR;
 			}
 			else
 			{
-				WorkingDirectory = PathToPackage;
+				WorkingDirectory = pathToPackage;
 			}
 			var specFile = Directory.EnumerateFiles(WorkingDirectory + "\\SPECS", "*.spec").FirstOrDefault();
 			if (specFile == null) Program.ExitWithMessage(ERRMSG_SPEC_FAILURE, EXIT_SPEC_ERROR);
@@ -68,7 +68,7 @@ namespace Wpkg
 			if (packageName == null) Program.ExitWithMessage(ERRMSG_NAME_FAILURE, EXIT_NAME_ERROR);
 			var packageVersion = Regex.Match(spec, "(?<=^Version:\\s*).*$", RegexOptions.Multiline)?.Value.Trim();
 
-			BuildDataTarball(WorkingDirectory, new List<string>(), $"{packageName}-{packageVersion}/");
+			BuildDataTarball(WorkingDirectory, execs, $"{packageName}-{packageVersion}/");
 
 			var srcFile = $"{WorkingDirectory}\\{packageName}-{packageVersion}.tar.gz";
 			using (var DataAsStream = CreateStream(WorkingDirectory, 1))
@@ -111,16 +111,44 @@ namespace Wpkg
 				Directory.Delete(rpmsDir, true);
 			}
 		}
-		public static void BuildDebPackage(string PathToPackage)
+
+		public static void BuildAppPackage(string pathToPackage, List<string> execs)
+		{
+			var origDir = pathToPackage;
+			pathToPackage = Program.GetCaseSensitivePath(Path.GetFullPath(pathToPackage));
+			var cwd = Environment.CurrentDirectory;
+			Environment.CurrentDirectory = pathToPackage;
+
+			string zipName = "softhub_x64.zip";
+			Stream outStream = File.Create(pathToPackage + "\\" + zipName);
+			Stream zipStream = new ZipOutputStream(outStream);
+			ZipFile dataZip = ZipFile.Create(zipStream);
+
+			Console.WriteLine($"Creating {origDir + "\\" + zipName}");
+
+			DirectoryInfo[] subdirs = new DirectoryInfo(pathToPackage).GetDirectories();
+			foreach (var dir in subdirs)
+			{
+				AddToZip(dataTar, dir, execs, prefix);
+			}
+
+			dataZip.Close();
+
+			Environment.CurrentDirectory = cwd;
+
+			Console.WriteLine();
+		}
+
+		public static void BuildDebPackage(string pathToPackage)
 		{
 			string WorkingDirectory = "";
-			if (String.IsNullOrEmpty(PathToPackage))
+			if (String.IsNullOrEmpty(pathToPackage))
 			{
 				WorkingDirectory = LOCAL_DIR;
 			}
 			else
 			{
-				WorkingDirectory = PathToPackage;
+				WorkingDirectory = pathToPackage;
 			}
 			//Program.VerifyStructure(WorkingDirectory);
 
@@ -177,6 +205,30 @@ namespace Wpkg
 				foreach (var subinfo in dir.EnumerateFileSystemInfos()) AddToTar(arch, subinfo, execs, prefix);
 			}
 		}
+
+		public static void AddToZip(ZipFile arch, FileSystemInfo info, List<string> execs, string prefix = "./")
+		{
+			ZipEntry entry = new ZipEntry(info.FullName);
+
+			if (info is FileInfo)
+			{
+				if (entry.Name.Contains("/bin/") || info.FullName.EndsWith(".exe") ||
+					info.Name == "preinst" || info.Name == "postinst" || info.Name == "prerm" || info.Name == "postrm" ||
+					execs.Contains(entry.Name))
+					entry..Mode = Convert.ToInt32("777", 8);
+				else entry.TarHeader.Mode = Convert.ToInt32("666", 8);
+			}
+			else entry.TarHeader.Mode = Convert.ToInt32("777", 8);
+			if (!Program.Options.SilentMode)
+				Console.WriteLine($"  add {entry.Name}");
+			arch.WriteEntry(entry, false);
+
+			if (info is DirectoryInfo dir)
+			{
+				foreach (var subinfo in dir.EnumerateFileSystemInfos()) AddToTar(arch, subinfo, execs, prefix);
+			}
+		}
+
 		public static void BuildDataTarball(string directory, List<string> execs, string prefix = "./")
 		{
 			var origDir = directory;
@@ -291,7 +343,8 @@ namespace Wpkg
 				{
 					// gzip the tar
 					using (fs)
-					using (var gzip = new GZipStream(File.Create(WorkingType + ".gz"), CompressionLevel.Optimal, false)) fs.CopyTo(gzip);
+					using (var gzip = new GZipStream(File.Create(WorkingType + ".gz"), CompressionLevel.Optimal, false)) 
+						fs.CopyTo(gzip);
 
 					fs = File.OpenRead(WorkingType + ".gz");
 				}
