@@ -119,20 +119,21 @@ namespace Wpkg
 			var cwd = Environment.CurrentDirectory;
 			Environment.CurrentDirectory = pathToPackage;
 
-			string zipName = "softhub_x64.zip";
-			Stream outStream = File.Create(pathToPackage + "\\" + zipName);
-			Stream zipStream = new ZipOutputStream(outStream);
-			ZipFile dataZip = ZipFile.Create(zipStream);
+			string zipName = "outZip.zip";
+			string zipFullPath = GetDirectoryFromFilePath(Environment.CurrentDirectory.TrimEnd('/', '\\')).TrimEnd('/', '\\') + "/" + zipName;
+			Stream outStream = File.Create(zipFullPath);
+			ZipOutputStream zipStream = new ZipOutputStream(outStream);
 
-			Console.WriteLine($"Creating {origDir + "\\" + zipName}");
+			Console.WriteLine($"Creating {zipFullPath}");
 
-			DirectoryInfo[] subdirs = new DirectoryInfo(pathToPackage).GetDirectories();
-			foreach (var dir in subdirs)
+			var files = Directory.EnumerateFiles(pathToPackage, "*", SearchOption.AllDirectories);
+			foreach (var file in files)
 			{
-				AddToZip(dataTar, dir, execs, prefix);
+				AddToZip(zipStream, file, execs);
 			}
 
-			dataZip.Close();
+			zipStream.Finish();
+			zipStream.Close();
 
 			Environment.CurrentDirectory = cwd;
 
@@ -209,27 +210,32 @@ namespace Wpkg
 		// https://stackoverflow.com/questions/434641/how-do-i-set-permissions-attributes-on-a-file-in-a-zip-file-using-pythons-zip/6297838#6297838
 		// https://unix.stackexchange.com/questions/14705/the-zip-formats-external-file-attribute/14727#14727
 		// https://github.com/dotnet/runtime/issues/17912
-		public static void AddToZip(ZipFile arch, FileSystemInfo info, List<string> execs, string prefix = "./")
+		public static void AddToZip(ZipOutputStream arch, string info, List<string> execs)
 		{
-			ZipEntry entry = new ZipEntry(info.FullName);
+			// file name shite
+			var currDirForEntry = GetDirectoryFromFilePath(Environment.CurrentDirectory.TrimEnd('/', '\\')); // skipping last part of a path
+			string fileName = info.Replace('\\', '/').Replace(currDirForEntry.Replace('\\', '/'), "").TrimStart('/');
 
-			if (info is FileInfo)
+			ZipEntry entry = new ZipEntry(fileName);
+
+			if (File.Exists(info))
 			{
-				if (entry.Name.Contains("/bin/") || info.FullName.EndsWith(".exe") ||
-					info.Name == "preinst" || info.Name == "postinst" || info.Name == "prerm" || info.Name == "postrm" ||
-					execs.Contains(entry.Name))
-					entry.ExternalFileAttributes = 777 << 16;
-				else entry.ExternalFileAttributes = 666 << 16;
+				if (entry.Name.Contains("/bin/") || execs.Contains(fileName))
+					entry.ExternalFileAttributes = Convert.ToInt32("777", 8) << 16;
+				else entry.ExternalFileAttributes = Convert.ToInt32("666", 8) << 16;
 			}
-			else entry.ExternalFileAttributes = 777 << 16;
 			if (!Program.Options.SilentMode)
 				Console.WriteLine($"  add {entry.Name}");
-			arch.Add(entry);
 
-			if (info is DirectoryInfo dir)
-			{
-				foreach (var subinfo in dir.EnumerateFileSystemInfos()) AddToZip(arch, subinfo, execs, prefix);
-			}
+			arch.PutNextEntry(entry);
+			var bts = File.ReadAllBytes(info);
+			arch.Write(bts, 0, bts.Length);
+		}
+
+		public static string GetDirectoryFromFilePath(string filePath)
+		{
+			return string.Concat(filePath.Replace("\\", "/").Reverse().SkipWhile(x => x != '/').Reverse());
+			// return Path.GetDirectoryName(filePath);
 		}
 
 		public static void BuildDataTarball(string directory, List<string> execs, string prefix = "./")

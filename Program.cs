@@ -11,25 +11,25 @@ namespace Wpkg
 {
 	public class WpkgOptions
 	{
-		[Option('b', "build", Default = ".", HelpText = "Path to the folder to build a .deb file")]
+		[Option('b', "build", Default = null, HelpText = "Path to the folder to build a .deb file")]
 		public string DebianPackage { get; set; }
 
-		[Option('r', "rpm", Default = ".", HelpText = "Path to the folder to build a .rpm file")]
+		[Option('r', "rpm", Default = null, HelpText = "Path to the folder to build a .rpm file")]
 		public string RpmPackage { get; set; }
 
-		[Option('a', "app", Default = ".", HelpText = "Path to the folder to build a .app file for MacOS")]
+		[Option('a', "app", Default = null, HelpText = "Path to the folder to build a .zip with an .app folder for MacOS")]
 		public string AppPackage { get; set; }
 
-		[Option("d2u", Default = "", HelpText = "Convert dos to unix. Specify files divided by ';' or ','")]
+		[Option("d2u", Default = null, HelpText = "Convert dos to unix. Specify files divided by ';' or ','")]
 		public string Dos2Unix { get; set; }
 
 		[Option('x', "extract", Default = new string[0], HelpText = "Extracts specified .deb file to the specified folder")]
 		public string[] ExtractDeb { get; set; }
 
-		[Option('t', "theme", Default = "package", HelpText = "This will create an empty base structure for an .deb with the specified file name")]
+		[Option('t', "theme", Default = null, HelpText = "This will create an empty base structure for an .deb with the specified file name")]
 		public string ThemeDeb { get; set; }
 
-		[Option('e', "execs", Default = ".", HelpText = "The file with a list of files that should be 'chmoded' as 777")]
+		[Option('e', "execs", Default = "./execs.txt", HelpText = "The file with a list of files that should be 'chmoded' as 777")]
 		public string ExecsPath { get; set; }
 
 		[Option('s', "silent", Default = false, HelpText = "Is the 'silent' mode should be enabled")]
@@ -134,7 +134,7 @@ namespace Wpkg
 				Directory.CreateDirectory(target + "\\Bundles\\com.apple.springboard");
 				GenerateControlFile(LOCAL_DIR);
 			}
-			else if (options.ExtractDeb != null)
+			else if (options.ExtractDeb != null && options.ExtractDeb.Length > 0)
 			{
 				if (options.ExtractDeb.Length == 2)
 				{
